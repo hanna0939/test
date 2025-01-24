@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>볼링 팀 나누기 (검색 & 핸디캡)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        .search-container {
+            margin: 20px 0;
+        }
+        .player-list {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        .selected-players {
+            margin-top: 20px;
+        }
+        .selected-players ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        .selected-players li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>볼링 팀 나누기 (검색 & 핸디캡)</h1>
+    <input type="file" id="fileInput" accept=".xlsx, .csv" />
+    <div class="search-container">
+        <h2>선수 검색</h2>
+        <input type="text" id="searchInput" placeholder="이름을 검색하세요" />
+        <div class="player-list" id="playerList"></div>
+    </div>
+    <div class="selected-players">
+        <h3>선택된 선수들</h3>
+        <ul id="selectedPlayersList"></ul>
+    </div>
+    <button id="generateTeams">팀 나누기</button>
+    <div id="output"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+    let playerData = [];
+    let selectedPlayers = [];
+
+    // 엑셀 파일 읽기
+    document.getElementById('fileInput').addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            playerData = XLSX.utils.sheet_to_json(sheet);
+        };
+
+        reader.readAsArrayBuffer(file);
+    });
+
+    // 검색 입력 처리
+    document.getElementById('searchInput').addEventListener('input', (event) => {
+        const query = event.target.value.toLowerCase();
+        const filteredPlayers = playerData.filter(player =>
+            player.이름.toLowerCase().includes(query)
+        );
+        displayPlayerList(filteredPlayers);
+    });
+
+    // 선수 리스트 표시
+    function displayPlayerList(data) {
+        const playerList = document.getElementById('playerList');
+        playerList.innerHTML = '';
+        data.forEach((player, index) => {
+            const div = document.createElement('div');
+            div.textContent = `${player.이름} (공식에버: ${player.공식에버})`;
+            div.style.cursor = 'pointer';
+            div.addEventListener('click', () => addPlayerToSelection(player));
+            playerList.appendChild(div);
+        });
+    }
+
+    // 선수 선택 추가
+    function addPlayerToSelection(player) {
+        if (selectedPlayers.some(p => p.이름 === player.이름)) {
+            alert("이미 선택된 선수입니다.");
+            return;
+        }
+        selectedPlayers.push(player);
+        updateSelectedPlayersList();
+    }
+
+    // 선택된 선수 표시
+    function updateSelectedPlayersList() {
+        const selectedPlayersList = document.getElementById('selectedPlayersList');
+        selectedPlayersList.innerHTML = '';
+        selectedPlayers.forEach(player => {
+            const li = document.createElement('li');
+            li.textContent = `${player.이름} (공식에버: ${player.공식에버})`;
+            selectedPlayersList.appendChild(li);
+        });
+    }
+
+    // 팀 나누기 버튼 클릭
+    document.getElementById('generateTeams').addEventListener('click', () => {
+        if (selectedPlayers.length < 2) {
+            alert("최소 2명 이상의 선수를 선택하세요!");
+            return;
+        }
+
+        const teams = generateBalancedTeamsWithCalculatedHandicap(selectedPlayers);
+        displayTeams(teams);
+    });
+
+    // 핸디캡 계산 후 팀 나누기
+    function generateBalancedTeamsWithCalculatedHandicap(data) {
+        data.forEach(player => {
+            player.average = parseFloat(player["공식에버"]) || 0;
+            player.handicap = 0;
+        });
+
+        const sorted = data.sort((a, b) => b.average - a.average);
+
+        const teamA = [];
+        const teamB = [];
+        let teamAScore = 0;
+        let teamBScore = 0;
+
+        sorted.forEach(player => {
+            if (teamAScore <= teamBScore) {
+                teamA.push(player);
+                teamAScore += player.average;
+            } else {
+                teamB.push(player);
+                teamBScore += player.average;
+            }
+        });
+
+        const scoreDifference = Math.abs(teamAScore - teamBScore);
+        let handicapAdjustment = 0;
+
+        if (teamAScore > teamBScore) {
+            handicapAdjustment = scoreDifference;
+            teamB.forEach(player => (player.handicap += handicapAdjustment / teamB.length));
+            teamBScore += handicapAdjustment;
+        } else if (teamBScore > teamAScore) {
+            handicapAdjustment = scoreDifference;
+            teamA.forEach(player => (player.handicap += handicapAdjustment / teamA.length));
+            teamAScore += handicapAdjustment;
+        }
+
+        return { teamA, teamB, teamAScore, teamBScore, handicapAdjustment };
+    }
+
+    // 팀 결과 출력
+    function displayTeams(teams) {
+        const output = document.getElementById('output');
+        output.innerHTML = `
+            <h2>Team A (총 점수: ${teams.teamAScore.toFixed(2)} - 핸디캡 포함)</h2>
+            ${generateTable(teams.teamA)}
+            <h2>Team B (총 점수: ${teams.teamBScore.toFixed(2)} - 핸디캡 포함)</h2>
+            ${generateTable(teams.teamB)}
+            <p>적용된 총 핸디캡 점수: ${teams.handicapAdjustment.toFixed(2)}</p>
+        `;
+    }
+
+    // 테이블 생성
+    function generateTable(team) {
+        if (team.length === 0) return "<p>팀에 선수가 없습니다.</p>";
+
+        const headers = Object.keys(team[0]);
+        let table = "<table><thead><tr>";
+
+        headers.forEach(header => {
+            table += `<th>${header}</th>`;
+        });
+
+        table += "</tr></thead><tbody>";
+
+        team.forEach(player => {
+            table += "<tr>";
+            headers.forEach(header => {
+                table += `<td>${player[header]}</td>`;
+            });
+            table += "</tr>";
+        });
+
+        table += "</tbody></table>";
+        return table;
+    }
+</script>
+</body>
+</html>
